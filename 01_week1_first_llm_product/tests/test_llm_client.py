@@ -6,7 +6,6 @@ Usa mocks para não depender de API keys em CI.
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from src.llm_client import LLMClient, LLMProvider, LLMRequest, LLMResponse
 
 

@@ -1,0 +1,64 @@
+# =============================================================================
+# LLM Engineering Mastery — Dependências
+# Organizado por camada de abstração (menor para maior)
+# =============================================================================
+
+# --- Núcleo científico (sem ML) ---
+numpy>=1.26.0
+scipy>=1.11.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# --- Deep Learning ---
+torch>=2.2.0
+torchvision>=0.17.0
+
+# --- NLP e Transformers ---
+transformers>=4.38.0
+tokenizers>=0.15.0
+datasets>=2.17.0
+accelerate>=0.27.0
+peft>=0.9.0                  # LoRA / QLoRA
+bitsandbytes>=0.42.0         # Quantização 4-bit/8-bit
+trl>=0.7.0                   # Training com RLHF/SFT
+
+# --- Embeddings e Vector Search ---
+sentence-transformers>=2.5.0
+faiss-cpu>=1.7.4             # Troque por faiss-gpu se tiver GPU
+chromadb>=0.4.0
+qdrant-client>=1.7.0
+
+# --- LLM APIs ---
+openai>=1.12.0
+anthropic>=0.18.0
+tiktoken>=0.6.0
+
+# --- HuggingFace Hub ---
+huggingface-hub>=0.21.0
+
+# --- UI e Demo ---
+gradio>=4.19.0
+
+# --- Notebooks ---
+jupyter>=1.0.0
+jupyterlab>=4.1.0
+ipywidgets>=8.1.0
+nbformat>=5.9.0
+
+# --- Qualidade de Código ---
+black>=24.2.0
+isort>=5.13.0
+flake8>=7.0.0
+mypy>=1.8.0
+
+# --- Testes ---
+pytest>=8.0.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0
+
+# --- Utilitários ---
+python-dotenv>=1.0.0
+pydantic>=2.6.0
+tqdm>=4.66.0
+rich>=13.7.0
+loguru>=0.7.0

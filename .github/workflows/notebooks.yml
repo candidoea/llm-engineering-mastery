@@ -1,0 +1,27 @@
+name: Notebook Validation
+
+on:
+  push:
+    paths:
+      - "**/*.ipynb"
+
+jobs:
+  validate:
+    name: Validate Notebooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install nbformat and nbconvert
+        run: pip install nbformat nbconvert
+
+      - name: Check notebooks are not corrupted
+        run: python scripts/validate_notebooks.py
+
+      - name: Check outputs are cleared (privacy)
+        run: python scripts/check_notebook_outputs.py

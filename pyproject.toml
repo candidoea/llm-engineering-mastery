@@ -1,0 +1,56 @@
+[project]
+name = "llm-engineering-mastery"
+version = "0.1.0"
+description = "Fork e extensão pessoal do curso LLM Engineering de Ed Donner"
+requires-python = ">=3.11"
+
+dependencies = [
+    # --- APIs de fronteira ---
+    "openai>=1.30.0",
+    "anthropic>=0.25.0",
+    "google-generativeai>=0.5.0",
+
+    # --- HuggingFace ecosystem ---
+    "transformers>=4.40.0",
+    "datasets>=2.19.0",
+    "huggingface-hub>=0.22.0",
+    "accelerate>=0.29.0",
+    "peft>=0.10.0",
+    "bitsandbytes>=0.43.0",
+    "trl>=0.8.0",
+
+    # --- Embeddings e RAG ---
+    "sentence-transformers>=2.7.0",
+    "chromadb>=0.5.0",
+    "faiss-cpu>=1.8.0",
+
+    # --- UI ---
+    "gradio>=4.28.0",
+
+    # --- Utilitários ---
+    "python-dotenv>=1.0.0",
+    "tiktoken>=0.7.0",
+    "requests>=2.31.0",
+
+    # --- Núcleo científico ---
+    "numpy>=1.26.0",
+    "matplotlib>=3.8.0",
+
+    # --- Notebooks ---
+    "jupyter>=1.0.0",
+    "ipywidgets>=8.1.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "black>=24.0.0",
+    "isort>=5.13.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100

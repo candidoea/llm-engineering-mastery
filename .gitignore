@@ -1,0 +1,50 @@
+# Credenciais — NUNCA commitar
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# uv / ambientes virtuais
+.venv/
+.python-version
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Dados e modelos (muito grandes para git)
+data/
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.gguf
+*.pkl
+
+# HuggingFace cache local
+.cache/
+
+# IDEs
+.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
+.cursorignore
+
+# Outputs de treinamento
+runs/
+wandb/
+outputs/
+logs/
+*.log
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/

@@ -41,10 +41,7 @@ def main() -> int:
         for nb in dirty:
             print(f"  {nb}")
         print("\nPara limpar todos:")
-        print(
-            "  find . -name '*.ipynb' | xargs jupyter nbconvert "
-            "--clear-output --inplace"
-        )
+        print("  find . -name '*.ipynb' | xargs jupyter nbconvert " "--clear-output --inplace")
         return 1
 
     print(f"Todos os {len(notebooks)} notebooks estão limpos.")

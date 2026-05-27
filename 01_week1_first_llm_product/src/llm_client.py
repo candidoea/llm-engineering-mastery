@@ -172,7 +172,4 @@ class LLMClient:
 
     def compare(self, request: LLMRequest) -> dict[str, LLMResponse]:
         """Envia o mesmo request para todos os provedores registrados."""
-        return {
-            name: provider.complete(request)
-            for name, provider in self._providers.items()
-        }
+        return {name: provider.complete(request) for name, provider in self._providers.items()}

@@ -2,6 +2,7 @@
 Testes unitários para LLMClient.
 Usa mocks para não depender de API keys em CI.
 """
+
 from unittest.mock import MagicMock
 
 import pytest

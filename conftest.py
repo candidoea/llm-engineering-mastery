@@ -2,8 +2,6 @@
 Configuração global do pytest.
 Fixtures compartilhadas entre todos os módulos.
 """
-
-import os
 import sys
 from pathlib import Path
 

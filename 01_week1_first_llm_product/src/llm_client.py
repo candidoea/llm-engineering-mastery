@@ -115,7 +115,8 @@ class AnthropicProvider(LLMProvider):
         except ImportError as e:
             raise ImportError("pip install anthropic") from e
 
-        self._client = anthropic.Anthropic(api_key=api_key or os.environ["ANTHROPIC_API_KEY"])
+        key = api_key or os.environ["ANTHROPIC_API_KEY"]
+        self._client = anthropic.Anthropic(api_key=key)
 
     @property
     def default_model(self) -> str:
@@ -171,4 +172,7 @@ class LLMClient:
 
     def compare(self, request: LLMRequest) -> dict[str, LLMResponse]:
         """Envia o mesmo request para todos os provedores registrados."""
-        return {name: provider.complete(request) for name, provider in self._providers.items()}
+        return {
+            name: provider.complete(request)
+            for name, provider in self._providers.items()
+        }

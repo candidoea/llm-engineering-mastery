@@ -1,0 +1,14 @@
+[project]
+name = "scraper-doctor"
+version = "0.1.0"
+description = "Diagnóstico e autocorreção de scrapers Selenium via LLM local (Ollama)"
+requires-python = ">=3.11"
+
+dependencies = [
+    "openai>=1.30.0",
+    "beautifulsoup4>=4.12.0",
+    "requests>=2.31.0",
+    "lxml>=5.1.0",
+    "selenium>=4.20.0",
+    "python-dotenv>=1.0.0",
+]

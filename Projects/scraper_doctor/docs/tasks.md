@@ -6,7 +6,7 @@ Backlog organizado por versão. Cada task tem critério de aceite explícito.
 
 ## v0.3.0 — Em andamento
 
-### TASK-01: Corrigir seletores de login do Five9
+### TASK-01: Corrigir seletores de login 
 **Prioridade:** Bloqueante — sem isso o crawler não avança da Etapa 2  
 **Módulo:** `crawler.py`  
 **O que fazer:**

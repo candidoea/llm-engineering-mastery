@@ -280,3 +280,73 @@ Retorne apenas o código Python corrigido, sem explicações."""
         fixed_code = ask(prompt, system=system, model=model or OLLAMA_MODEL_CODE)
 
     return fixed_code
+
+
+def generate_po_report(
+    replacements: dict,
+    stages_analyzed: list[str],
+    model: str | None = None,
+) -> str:
+    """
+    Gera um relatório de contexto em linguagem natural para o PO.
+
+    Não busca substitutos — analisa o que as mudanças identificadas
+    significam em termos de risco, padrão e sazonalidade.
+
+    Args:
+        replacements: dict {seletor_original: {substituto, estrategia, motivo}}
+        stages_analyzed: etapas do fluxo que foram analisadas
+        model: modelo a usar (None = OLLAMA_MODEL_FAST)
+
+    Returns:
+        Relatório em texto, em português, direcionado ao PO
+    """
+    if not replacements:
+        return (
+            "Nenhuma alteração detectada nas etapas analisadas. "
+            "O scraper deve estar funcionando corretamente."
+        )
+
+    changes_text = "\n".join([
+        f"- '{original}' substituído por '{info.get('substituto', 'não determinado')}'"
+        f" (estratégia: By.{info.get('estrategia', '?')})"
+        f" | origem: {info.get('origem', '?')}"
+        for original, info in replacements.items()
+    ])
+
+    etapas_text = ", ".join(stages_analyzed) if stages_analyzed else "não informadas"
+
+    system = (
+        "Você é um analista de automação. "
+        "Contexto: existe um script Python de web scraping que automatiza "
+        "tarefas em um site. O site mudou seu HTML e o script quebrou. "
+        "O Scraper Doctor identificou as mudanças e corrigiu o script automaticamente. "
+        "Seu papel é explicar ao Product Owner o que aconteceu com o script "
+        "e quais riscos existem para a automação — não para o site. "
+        "Responda SEMPRE em português do Brasil. "
+        "Use APENAS as informações fornecidas — nunca invente dados. "
+        "Seja conciso: máximo 3 linhas por seção."
+    )
+
+    prompt = f"""O script de automação quebrou porque o site alterou seus elementos HTML.
+O Scraper Doctor detectou e corrigiu automaticamente as seguintes mudanças:
+
+ETAPAS DO FLUXO ANALISADAS: {etapas_text}
+
+CORREÇÕES APLICADAS NO SCRIPT (elemento antigo → elemento novo no site):
+{changes_text}
+
+Responda EXATAMENTE neste formato, sem adicionar nada além:
+
+## O que aconteceu com o script
+[1-2 frases: o site mudou X e o script parou de funcionar nesse ponto]
+
+## As mudanças parecem
+[1 frase: planejadas/permanentes ou acidentais/temporárias — baseado no padrão observado]
+
+## Risco para a automação
+[1 frase: se o site mudar novamente nessas etapas, o script pode quebrar de novo — o que monitorar]
+
+Não use saudações, assinaturas, listas com traço ou informações não fornecidas."""
+
+    return ask(prompt, system=system, model=model, stream=True)

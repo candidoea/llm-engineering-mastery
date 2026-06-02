@@ -285,23 +285,28 @@ Retorne apenas o código Python corrigido, sem explicações."""
 def generate_po_report(
     replacements: dict,
     stages_analyzed: list[str],
+    infra_issues: list | None = None,
     model: str | None = None,
 ) -> str:
     """
     Gera um relatório de contexto em linguagem natural para o PO.
 
-    Não busca substitutos — analisa o que as mudanças identificadas
-    significam em termos de risco, padrão e sazonalidade.
+    Cobre dois tipos de problemas:
+    1. Seletores HTML quebrados (corrigidos automaticamente)
+    2. Problemas de infraestrutura (requerem ação manual)
 
     Args:
         replacements: dict {seletor_original: {substituto, estrategia, motivo}}
         stages_analyzed: etapas do fluxo que foram analisadas
+        infra_issues: lista de InfraIssue detectados no scraper
         model: modelo a usar (None = OLLAMA_MODEL_FAST)
 
     Returns:
         Relatório em texto, em português, direcionado ao PO
     """
-    if not replacements:
+    infra_issues = infra_issues or []
+
+    if not replacements and not infra_issues:
         return (
             "Nenhuma alteração detectada nas etapas analisadas. "
             "O scraper deve estar funcionando corretamente."
@@ -309,10 +314,14 @@ def generate_po_report(
 
     changes_text = "\n".join([
         f"- '{original}' substituído por '{info.get('substituto', 'não determinado')}'"
-        f" (estratégia: By.{info.get('estrategia', '?')})"
-        f" | origem: {info.get('origem', '?')}"
+        f" (By.{info.get('estrategia', '?')})"
         for original, info in replacements.items()
-    ])
+    ]) if replacements else "Nenhuma substituição de seletor necessária."
+
+    infra_text = "\n".join([
+        f"- linha {issue.line}: {issue.kind} — {issue.suggestion}"
+        for issue in infra_issues
+    ]) if infra_issues else "Nenhum problema de infraestrutura detectado."
 
     etapas_text = ", ".join(stages_analyzed) if stages_analyzed else "não informadas"
 
@@ -328,25 +337,27 @@ def generate_po_report(
         "Seja conciso: máximo 3 linhas por seção."
     )
 
-    prompt = f"""O script de automação quebrou porque o site alterou seus elementos HTML.
-O Scraper Doctor detectou e corrigiu automaticamente as seguintes mudanças:
+    prompt = f"""O script de automação apresentou problemas. Analise e gere o relatório abaixo.
 
 ETAPAS DO FLUXO ANALISADAS: {etapas_text}
 
-CORREÇÕES APLICADAS NO SCRIPT (elemento antigo → elemento novo no site):
+CORREÇÕES DE SELETORES HTML (corrigidas automaticamente pelo Scraper Doctor):
 {changes_text}
+
+PROBLEMAS DE INFRAESTRUTURA (requerem ação manual do time técnico):
+{infra_text}
 
 Responda EXATAMENTE neste formato, sem adicionar nada além:
 
 ## O que aconteceu com o script
-[1-2 frases: o site mudou X e o script parou de funcionar nesse ponto]
+[1-2 frases descrevendo o que quebrou e o que foi corrigido automaticamente]
 
 ## As mudanças parecem
-[1 frase: planejadas/permanentes ou acidentais/temporárias — baseado no padrão observado]
+[1 frase: planejadas/permanentes ou acidentais/temporárias]
 
-## Risco para a automação
-[1 frase: se o site mudar novamente nessas etapas, o script pode quebrar de novo — o que monitorar]
+## Ação necessária
+[1-2 frases: o que o time técnico precisa fazer manualmente antes de executar o script corrigido]
 
-Não use saudações, assinaturas, listas com traço ou informações não fornecidas."""
+Não use saudações, assinaturas ou informações não fornecidas."""
 
     return ask(prompt, system=system, model=model, stream=True)

@@ -25,10 +25,20 @@ class Selector:
 
 
 @dataclass
+class InfraIssue:
+    """Problema de infraestrutura detectado no scraper (não é seletor HTML)."""
+    line: int
+    kind: str    # hardcoded_path, network_drive, binary_location
+    value: str   # o valor problemático
+    suggestion: str  # o que fazer
+
+
+@dataclass
 class ScraperProfile:
     selectors: list[Selector] = field(default_factory=list)
     urls: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
+    infra_issues: list[InfraIssue] = field(default_factory=list)
 
 
 class SelectorVisitor(ast.NodeVisitor):
@@ -128,6 +138,61 @@ class SelectorVisitor(ast.NodeVisitor):
         self._add_selector(strategy, value, lineno)
 
 
+def _detect_infra_issues(source: str) -> list:
+    """
+    Detecta problemas de infraestrutura no código fonte do scraper.
+
+    Padrões detectados:
+    - Caminhos hardcoded para ChromeDriver/Chrome em drives não-padrão
+    - binary_location hardcoded
+    - Diretórios de rede hardcoded
+    """
+    import re
+
+    issues = []
+
+    for i, line in enumerate(source.splitlines(), start=1):
+        stripped = line.strip()
+
+        # Drive diferente de C: (ex: F:\, D:\)
+        if any(f"{d}:\\" in stripped or f"{d}:/" in stripped for d in "ABDEFGHIJKLMNOPQRSTUVWXYZ"):
+            issues.append(InfraIssue(
+                line=i,
+                kind="hardcoded_path",
+                value=stripped[:80],
+                suggestion=(
+                    "Remova o caminho hardcoded. Use Service() sem argumentos "
+                    "para que o Selenium Manager gerencie o driver automaticamente."
+                )
+            ))
+
+        # binary_location hardcoded
+        elif "binary_location" in stripped and "=" in stripped:
+            issues.append(InfraIssue(
+                line=i,
+                kind="binary_location",
+                value=stripped[:80],
+                suggestion=(
+                    "Remova options.binary_location. O Chrome instalado "
+                    "no sistema será detectado automaticamente."
+                )
+            ))
+
+        # Diretório de rede UNC hardcoded
+        elif stripped.startswith("DOWNLOAD_DIR") and "\\" in stripped:
+            issues.append(InfraIssue(
+                line=i,
+                kind="network_path",
+                value=stripped[:80],
+                suggestion=(
+                    "Mova DOWNLOAD_DIR para o arquivo .env como "
+                    "variável de ambiente."
+                )
+            ))
+
+    return issues
+
+
 def extract_from_file(path: str | Path) -> ScraperProfile:
     """
     Lê um arquivo Python e extrai o perfil completo do scraper.
@@ -151,10 +216,13 @@ def extract_from_file(path: str | Path) -> ScraperProfile:
     # Ordena por linha para facilitar leitura
     visitor.selectors.sort(key=lambda s: s.line)
 
+    infra_issues = _detect_infra_issues(source)
+
     return ScraperProfile(
         selectors=visitor.selectors,
         urls=visitor.urls,
         actions=visitor.actions,
+        infra_issues=infra_issues,
     )
 
 
@@ -175,5 +243,11 @@ def summarize(profile: ScraperProfile) -> str:
     lines.append(f"\nAções de interação ({len(profile.actions)}):")
     for action in profile.actions:
         lines.append(f"  {action}")
+
+    if profile.infra_issues:
+        lines.append(f"\n⚠️  Problemas de infraestrutura detectados ({len(profile.infra_issues)}):")
+        for issue in profile.infra_issues:
+            lines.append(f"  linha {issue.line:3d} | {issue.kind:<18} | {issue.value}")
+            lines.append(f"           → {issue.suggestion}")
 
     return "\n".join(lines)

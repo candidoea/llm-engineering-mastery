@@ -24,7 +24,7 @@ from config import (
 )
 from comparator import compare
 from extractor import Selector, extract_from_file, summarize
-from llm_client import diagnose_with_llm, fix_with_llm
+from llm_client import diagnose_with_llm, fix_with_llm, generate_po_report
 from metrics import RunMetrics
 
 
@@ -237,6 +237,8 @@ def run(
     print(f"  Seletores: {len(profile.selectors)}")
     print(f"  URLs:      {len(profile.urls)}")
     print(f"  Ações:     {len(profile.actions)}")
+    if profile.infra_issues:
+        print(f"  ⚠️  Infra:    {len(profile.infra_issues)} problema(s) detectado(s)")
     print()
     print(summarize(profile))
 
@@ -277,6 +279,8 @@ def run(
         print("=" * 60)
 
         found_broken = False
+        all_replacements: dict = {}
+        stages_analyzed: list[str] = []
 
         for stage_name in HTML_STAGE_ORDER:
             if stage_name not in crawl_result.pages:
@@ -295,7 +299,10 @@ def run(
                 scraper_path=scraper_path,
             )
 
+            stages_analyzed.append(stage_name)
+
             if replacements:
+                all_replacements.update(replacements)
                 metrics.stages_failed += 1
                 found_broken = True
                 print(f"\n[STOP] Etapa '{stage_name}' tem seletores quebrados.")
@@ -307,6 +314,28 @@ def run(
 
         if not found_broken:
             print("\n[OK] Todos os seletores estão corretos em todas as etapas.")
+
+        # ------------------------------------------------------------------
+        # RELATÓRIO DE CONTEXTO PARA O PO
+        # Gerado sempre ao final — independente de ter encontrado quebras
+        # ------------------------------------------------------------------
+        print("\n" + "=" * 60)
+        print("RELATÓRIO DE CONTEXTO — Product Owner")
+        print("=" * 60)
+
+        t_po = time.perf_counter()
+        po_report = generate_po_report(
+            replacements=all_replacements,
+            stages_analyzed=stages_analyzed,
+            infra_issues=profile.infra_issues,
+        )
+        metrics.llm_time_s += time.perf_counter() - t_po
+        if all_replacements:
+            metrics.llm_calls += 1
+
+        po_report_path = REPORTS_DIR / f"po_report_{ts}.txt"
+        po_report_path.write_text(po_report, encoding="utf-8")
+        print(f"\n[PO] Relatório salvo em: {po_report_path.name}")
 
     else:
         # Modo sem crawl: usa HTML único fornecido

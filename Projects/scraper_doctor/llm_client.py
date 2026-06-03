@@ -245,6 +245,34 @@ def fix_with_llm(
         for a in applied:
             print(a)
 
+    # Substitui credenciais hardcoded por os.environ.get com fallback
+    # Garante que o scraper_fixed.py usa sempre as credenciais do .env
+    if "USER_EMAIL" in fixed_code or "USER_PASSWORD" in fixed_code:
+        import re
+
+        # Detecta e substitui USER_EMAIL = "valor_hardcoded"
+        fixed_code = re.sub(
+            r'(USER_EMAIL\s*=\s*)["\']([^"\']*)["\']',
+            r'\1os.environ.get("TARGET_USERNAME", "\2")',
+            fixed_code,
+        )
+        # Detecta e substitui USER_PASSWORD = "valor_hardcoded"
+        fixed_code = re.sub(
+            r'(USER_PASSWORD\s*=\s*)["\']([^"\']*)["\']',
+            r'\1os.environ.get("TARGET_PASSWORD", "\2")',
+            fixed_code,
+        )
+        # Garante que os e dotenv estão importados
+        if "import os" not in fixed_code:
+            fixed_code = "import os\n" + fixed_code
+        if "load_dotenv" not in fixed_code:
+            fixed_code = fixed_code.replace(
+                "import os\n",
+                "import os\nfrom dotenv import load_dotenv\nload_dotenv()\n",
+                1,
+            )
+        print("[CORREÇÃO] Credenciais atualizadas para usar os.environ.get (com fallback)")
+
     # Se houver seletores que precisam de raciocínio mais complexo (XPath, CSS),
     # aciona o LLM apenas para esses
     complex_cases = {

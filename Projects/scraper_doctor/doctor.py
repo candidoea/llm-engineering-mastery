@@ -389,7 +389,7 @@ def run(
             metrics.llm_calls += 1
 
         po_report_path = REPORTS_DIR / f"po_report_{ts}.txt"
-        po_report_path.write_text(po_report, encoding="utf-8-sig")
+        po_report_path.write_text(po_report, encoding="utf-8")
         print(f"\n[PO] Relatório salvo em: {po_report_path.name}")
 
     else:
@@ -423,8 +423,41 @@ if __name__ == "__main__":
     parser.add_argument("--crawl", action="store_true", help="Navega com Selenium")
     parser.add_argument("--visible", action="store_true", help="Chrome visível")
     parser.add_argument("--fix", action="store_true", help="Gera scraper corrigido")
+    parser.add_argument(
+        "--agent", action="store_true",
+        help="Agent mode: valida o scraper_fixed.py e itera automaticamente"
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=3,
+        help="Máximo de iterações do agent (default: 3)"
+    )
 
     args = parser.parse_args()
+
+    # Se --agent, executa o ciclo autônomo no scraper_fixed mais recente
+    if args.agent:
+        from agent import run_agent
+        import glob
+
+        fixed_files = sorted(
+            glob.glob(str(OUTPUT_DIR / "scraper_fixed_*.py")),
+            key=lambda f: Path(f).stat().st_mtime,
+            reverse=True,
+        )
+
+        if not fixed_files:
+            print("[AGENT] Nenhum scraper_fixed_*.py encontrado em output/")
+            print("[AGENT] Execute primeiro: python doctor.py <scraper> --crawl --fix")
+            sys.exit(1)
+
+        latest_fixed = fixed_files[0]
+        print(f"[AGENT] Usando scraper mais recente: {Path(latest_fixed).name}")
+
+        run_agent(
+            scraper_fixed_path=latest_fixed,
+            max_iterations=args.iterations,
+        )
+        sys.exit(0)
 
     run(
         scraper_path=args.scraper,

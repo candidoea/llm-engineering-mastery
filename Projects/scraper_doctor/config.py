@@ -33,8 +33,15 @@ MAX_PROMPT_CHARS = 4000
 # Criar diretórios se não existirem
 for directory in [HTML_DIR, REPORTS_DIR, OUTPUT_DIR]:
     directory.mkdir(exist_ok=True)
+
 # =============================================================================
 # Mapeamento seletor → etapa do fluxo (TASK-03)
+#
+# Pode ser definido manualmente OU gerado automaticamente via
+# build_stage_map() com base nas URLs acessadas no scraper.
+#
+# Quando definido manualmente: linha → nome da etapa
+# Quando gerado automaticamente: heurística por URL e ordem de acesso
 # =============================================================================
 SELECTOR_STAGE_MAP: dict[int, str] = {
     66: "01_login",
@@ -53,6 +60,46 @@ SELECTOR_STAGE_MAP: dict[int, str] = {
     171: "06_period_config",
 }
 
+
+def build_stage_map(
+    selectors: list,
+    stage_order: list[str],
+) -> dict[int, str]:
+    """
+    Gera SELECTOR_STAGE_MAP automaticamente quando não definido manualmente.
+
+    Heurística: divide os seletores em blocos proporcionais às etapas,
+    respeitando a ordem de linha. Seletores no primeiro terço vão para
+    as primeiras etapas, etc.
+
+    Útil para scrapers novos onde o mapeamento ainda não foi definido.
+    Para máxima precisão, defina SELECTOR_STAGE_MAP manualmente após
+    a primeira execução.
+
+    Args:
+        selectors: lista de Selector extraídos do scraper
+        stage_order: lista de nomes de etapas em ordem
+
+    Returns:
+        dict {linha: etapa}
+    """
+    if not selectors or not stage_order:
+        return {}
+
+    sorted_sels = sorted(selectors, key=lambda s: s.line)
+    n = len(sorted_sels)
+    stages = len(stage_order)
+    block = max(1, n // stages)
+
+    result = {}
+    for i, sel in enumerate(sorted_sels):
+        stage_idx = min(i // block, stages - 1)
+        result[sel.line] = stage_order[stage_idx]
+
+    return result
+
+# Mapeamento etapa → arquivo HTML capturado pelo crawler
+# Permite que o doctor saiba qual HTML usar para cada etapa
 HTML_STAGE_ORDER = [
     "01_login",
     "02_post_login",

@@ -89,6 +89,40 @@ def compare(
     return report
 
 
+def _check_xpath(
+    xpath: str, soup: BeautifulSoup
+) -> "SelectorResult | None":
+    """
+    Verifica um XPath usando lxml.
+
+    Retorna SelectorResult se conseguiu verificar, None se não foi possível
+    (XPath com funções não suportadas, etc.).
+    """
+    try:
+        from lxml import etree
+
+        html_str = str(soup)
+        parser = etree.HTMLParser()
+        tree = etree.fromstring(html_str.encode("utf-8"), parser)
+        results = tree.xpath(xpath)
+
+        # Cria um Selector temporário para o resultado
+        # (será substituído pelo caller)
+        from extractor import Selector as Sel
+        dummy = Sel(strategy="XPATH", value=xpath, line=0)
+
+        if results:
+            return SelectorResult(selector=dummy, found=True)
+        else:
+            return SelectorResult(
+                selector=dummy,
+                found=False,
+                note=f"XPath '{xpath[:80]}' não encontrou elementos no HTML atual.",
+            )
+    except Exception:
+        return None
+
+
 def _check_selector(sel: Selector, soup: BeautifulSoup) -> SelectorResult:
     """Verifica um seletor individual no soup."""
 
@@ -120,9 +154,11 @@ def _check_selector(sel: Selector, soup: BeautifulSoup) -> SelectorResult:
         elements = soup.find_all(class_=value)
         if elements:
             return SelectorResult(selector=sel, found=True)
+        candidates = _find_similar_classes(soup, value)
         return SelectorResult(
             selector=sel,
             found=False,
+            candidates=candidates,
             note=f"Classe '{value}' não encontrada no HTML atual.",
         )
 
@@ -150,13 +186,17 @@ def _check_selector(sel: Selector, soup: BeautifulSoup) -> SelectorResult:
         )
 
     elif strategy == "XPATH":
-        # BeautifulSoup não suporta XPath nativamente.
-        # Fazemos uma busca heurística pelo valor do seletor.
-        note = (
-            f"XPath '{value[:60]}...' requer lxml para verificação precisa. "
-            "Encaminhado para diagnóstico via LLM."
+        # Tenta verificação real com lxml
+        result = _check_xpath(value, soup)
+        if result is not None:
+            # Substitui o dummy selector pelo real
+            result.selector = sel
+            return result
+        return SelectorResult(
+            selector=sel,
+            found=True,
+            note="XPath não verificável estaticamente.",
         )
-        return SelectorResult(selector=sel, found=True, note=note)
 
     else:
         return SelectorResult(
@@ -231,6 +271,32 @@ def _score_candidate(target_id: str, candidate_id: str) -> int:
         score += 10
 
     return score
+
+
+def _find_similar_classes(soup: BeautifulSoup, target_class: str) -> list[str]:
+    """
+    Busca classes no HTML similares à classe quebrada.
+    Usa o mesmo sistema de score de _find_similar_ids.
+    """
+    target_lower = target_class.lower()
+    scored = []
+
+    # Coleta todas as classes únicas do documento
+    all_classes: set[str] = set()
+    for tag in soup.find_all(class_=True):
+        classes = tag.get("class", [])
+        if isinstance(classes, list):
+            all_classes.update(classes)
+        elif isinstance(classes, str):
+            all_classes.add(classes)
+
+    for cls in all_classes:
+        score = _score_candidate(target_class, cls)
+        if score > 0:
+            scored.append((score, cls))
+
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [c for _, c in scored[:5]]
 
 
 def _find_similar_ids(soup: BeautifulSoup, target_id: str) -> list[str]:

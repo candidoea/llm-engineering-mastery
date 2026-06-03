@@ -282,6 +282,70 @@ Retorne apenas o código Python corrigido, sem explicações."""
     return fixed_code
 
 
+def _ask_selectors_section(
+    replacements: dict,
+    stages_analyzed: list[str],
+    model: str | None = None,
+) -> str:
+    """Prompt focado apenas nos seletores — contexto mínimo para o phi3."""
+    etapas = ", ".join(stages_analyzed) if stages_analyzed else "não informadas"
+    changes = "\n".join([
+        f"- {orig} → {info.get('substituto', '?')}"
+        for orig, info in replacements.items()
+    ])
+
+    system = (
+        "Você é um analista de automação. "
+        "Responda SEMPRE em português do Brasil. "
+        "Use APENAS as informações fornecidas. "
+        "Seja direto. Máximo 2 frases por seção."
+    )
+
+    prompt = f"""Um script de web scraping quebrou porque o site alterou seus elementos HTML.
+O Scraper Doctor corrigiu automaticamente os seguintes seletores:
+
+ETAPAS ANALISADAS: {etapas}
+CORREÇÕES: {changes}
+
+Responda EXATAMENTE assim, sem nada além:
+
+## O que aconteceu
+[1-2 frases: quais elementos mudaram e o que foi corrigido]
+
+## As mudanças parecem
+[1 frase: planejadas ou acidentais]
+
+## Risco
+[1 frase: o que monitorar para evitar nova quebra]"""
+
+    return ask(prompt, system=system, model=model, stream=True)
+
+
+def _build_infra_section(infra_issues: list) -> str:
+    """
+    Gera a seção de infraestrutura sem LLM — texto determinístico.
+    Evita enviar infra_issues ao phi3, que degrada com contexto longo.
+    """
+    if not infra_issues:
+        return ""
+
+    KIND_LABELS = {
+        "hardcoded_path": "Caminho hardcoded de ChromeDriver",
+        "binary_location": "Binary location hardcoded do Chrome",
+        "network_path": "Diretório de rede hardcoded",
+    }
+
+    lines = ["\n## Ação manual necessária"]
+    lines.append(
+        "Antes de executar o script corrigido, o time técnico deve ajustar:"
+    )
+    for issue in infra_issues:
+        label = KIND_LABELS.get(issue.kind, issue.kind)
+        lines.append(f"- **Linha {issue.line} — {label}:** {issue.suggestion}")
+
+    return "\n".join(lines)
+
+
 def generate_po_report(
     replacements: dict,
     stages_analyzed: list[str],
@@ -289,20 +353,11 @@ def generate_po_report(
     model: str | None = None,
 ) -> str:
     """
-    Gera um relatório de contexto em linguagem natural para o PO.
+    Gera relatório de contexto para o PO em duas partes independentes:
+    1. Seção de seletores — gerada pelo LLM com prompt focado
+    2. Seção de infraestrutura — gerada deterministicamente (sem LLM)
 
-    Cobre dois tipos de problemas:
-    1. Seletores HTML quebrados (corrigidos automaticamente)
-    2. Problemas de infraestrutura (requerem ação manual)
-
-    Args:
-        replacements: dict {seletor_original: {substituto, estrategia, motivo}}
-        stages_analyzed: etapas do fluxo que foram analisadas
-        infra_issues: lista de InfraIssue detectados no scraper
-        model: modelo a usar (None = OLLAMA_MODEL_FAST)
-
-    Returns:
-        Relatório em texto, em português, direcionado ao PO
+    Separar evita que o contexto de infra degrade a qualidade do LLM.
     """
     infra_issues = infra_issues or []
 
@@ -312,52 +367,27 @@ def generate_po_report(
             "O scraper deve estar funcionando corretamente."
         )
 
-    changes_text = "\n".join([
-        f"- '{original}' substituído por '{info.get('substituto', 'não determinado')}'"
-        f" (By.{info.get('estrategia', '?')})"
-        for original, info in replacements.items()
-    ]) if replacements else "Nenhuma substituição de seletor necessária."
+    parts = []
 
-    infra_text = "\n".join([
-        f"- linha {issue.line}: {issue.kind} — {issue.suggestion}"
-        for issue in infra_issues
-    ]) if infra_issues else "Nenhum problema de infraestrutura detectado."
+    # Parte 1: seletores via LLM (prompt pequeno e focado)
+    if replacements:
+        selectors_section = _ask_selectors_section(
+            replacements=replacements,
+            stages_analyzed=stages_analyzed,
+            model=model,
+        )
+        parts.append(selectors_section)
+    else:
+        parts.append(
+            "## O que aconteceu\n"
+            "Nenhum seletor HTML foi alterado nas etapas analisadas.\n\n"
+            "## As mudanças parecem\nNão aplicável.\n\n"
+            "## Risco\nNenhum risco imediato identificado nos seletores."
+        )
 
-    etapas_text = ", ".join(stages_analyzed) if stages_analyzed else "não informadas"
+    # Parte 2: infraestrutura determinística (sem LLM)
+    infra_section = _build_infra_section(infra_issues)
+    if infra_section:
+        parts.append(infra_section)
 
-    system = (
-        "Você é um analista de automação. "
-        "Contexto: existe um script Python de web scraping que automatiza "
-        "tarefas em um site. O site mudou seu HTML e o script quebrou. "
-        "O Scraper Doctor identificou as mudanças e corrigiu o script automaticamente. "
-        "Seu papel é explicar ao Product Owner o que aconteceu com o script "
-        "e quais riscos existem para a automação — não para o site. "
-        "Responda SEMPRE em português do Brasil. "
-        "Use APENAS as informações fornecidas — nunca invente dados. "
-        "Seja conciso: máximo 3 linhas por seção."
-    )
-
-    prompt = f"""O script de automação apresentou problemas. Analise e gere o relatório abaixo.
-
-ETAPAS DO FLUXO ANALISADAS: {etapas_text}
-
-CORREÇÕES DE SELETORES HTML (corrigidas automaticamente pelo Scraper Doctor):
-{changes_text}
-
-PROBLEMAS DE INFRAESTRUTURA (requerem ação manual do time técnico):
-{infra_text}
-
-Responda EXATAMENTE neste formato, sem adicionar nada além:
-
-## O que aconteceu com o script
-[1-2 frases descrevendo o que quebrou e o que foi corrigido automaticamente]
-
-## As mudanças parecem
-[1 frase: planejadas/permanentes ou acidentais/temporárias]
-
-## Ação necessária
-[1-2 frases: o que o time técnico precisa fazer manualmente antes de executar o script corrigido]
-
-Não use saudações, assinaturas ou informações não fornecidas."""
-
-    return ask(prompt, system=system, model=model, stream=True)
+    return "\n\n".join(parts)

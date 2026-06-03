@@ -6,3 +6,4 @@ reports/
 output/
 .env
 Projects/scraper_doctor/scrapers/original_scraper.py
+scrapers/

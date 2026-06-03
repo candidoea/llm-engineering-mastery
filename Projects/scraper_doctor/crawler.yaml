@@ -1,0 +1,73 @@
+# crawler_config.yaml — Configuração do fluxo de navegação para o Scraper Doctor
+#
+# Define as etapas que o crawler executará para capturar o HTML de cada passo
+# do fluxo do scraper a ser diagnosticado.
+#
+# Cada etapa tem:
+#   name:       identificador único (usado no SELECTOR_STAGE_MAP)
+#   action:     tipo de ação (get, click, send_keys, select, wait)
+#   selector:   estratégia + valor (para ações que precisam de elemento)
+#   value:      valor a enviar (send_keys, select)
+#   wait:       segundos de espera após a ação
+#   save_html:  true para capturar o HTML desta etapa
+#
+# Variáveis de ambiente disponíveis: ${TARGET_URL}, ${TARGET_USERNAME}, ${TARGET_PASSWORD}
+
+stages:
+  - name: 01_login
+    save_html: true
+    actions:
+      - action: get
+        value: "${TARGET_URL}"
+      - action: wait
+        value: 2
+
+  - name: 02_post_login
+    save_html: true
+    actions:
+      - action: send_keys
+        selector: {strategy: ID, value: username}
+        value: "${TARGET_USERNAME}"
+      - action: send_keys
+        selector: {strategy: ID, value: password}
+        value: "${TARGET_PASSWORD}"
+      - action: click
+        selector: {strategy: ID, value: loginBtn}
+      - action: wait
+        value: 6
+
+  - name: 03_reports
+    save_html: true
+    actions:
+      - action: click
+        selector: {strategy: XPATH, value: "//span[contains(text(), 'Dashboard & Reports')]"}
+      - action: wait_for
+        selector: {strategy: CLASS_NAME, value: yui-navset-top}
+      - action: wait
+        value: 2
+
+  - name: 04_canned_reports
+    save_html: true
+    actions:
+      - action: click_js
+        selector: {strategy: ID, value: tab1}
+      - action: wait_for
+        selector: {strategy: ID, value: cannedReports}
+      - action: wait
+        value: 3
+
+  - name: 05_run_config
+    save_html: true
+    actions:
+      - action: click_js
+        selector:
+          strategy: XPATH
+          value: "//tr[td/a[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'adherence audit')]]//a[contains(text(), 'Run')]"
+      - action: wait
+        value: 10
+
+  - name: 06_period_config
+    save_html: true
+    actions:
+      - action: wait_for
+        selector: {strategy: ID, value: rdw_tf_interval}

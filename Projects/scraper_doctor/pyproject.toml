@@ -11,4 +11,5 @@ dependencies = [
     "lxml>=5.1.0",
     "selenium>=4.20.0",
     "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
 ]

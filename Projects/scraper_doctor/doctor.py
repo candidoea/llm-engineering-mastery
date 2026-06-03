@@ -21,6 +21,7 @@ from config import (
     OUTPUT_DIR,
     REPORTS_DIR,
     SELECTOR_STAGE_MAP,
+    build_stage_map,
 )
 from comparator import compare
 from extractor import Selector, extract_from_file, summarize
@@ -78,11 +79,40 @@ def _extract_relevant_html(html_path: Path) -> str:
 
 def _apply_stage_map(selectors: list[Selector]) -> list[Selector]:
     """
-    Anota cada seletor com sua etapa usando SELECTOR_STAGE_MAP.
-    Seletores não mapeados recebem stage='unknown'.
+    Anota cada seletor com sua etapa.
+
+    Prioridade:
+    1. SELECTOR_STAGE_MAP manual (config.py) — mais preciso
+    2. build_stage_map automático — para seletores não mapeados
+    3. 'unknown' — se nenhum mapa cobrir
+
+    Quando mais de 30% dos seletores ficam como 'unknown',
+    gera o mapa automático e avisa o usuário.
     """
     for sel in selectors:
         sel.stage = SELECTOR_STAGE_MAP.get(sel.line, "unknown")
+
+    unknown_count = sum(1 for s in selectors if s.stage == "unknown")
+    unknown_pct = unknown_count / len(selectors) if selectors else 0
+
+    if unknown_pct > 0.30:
+        print(
+            f"  [AVISO] {unknown_count}/{len(selectors)} seletores sem stage mapeado "
+            f"({unknown_pct:.0%}). Gerando mapeamento automático..."
+        )
+        auto_map = build_stage_map(
+            [s for s in selectors if s.stage == "unknown"],
+            HTML_STAGE_ORDER,
+        )
+        for sel in selectors:
+            if sel.stage == "unknown" and sel.line in auto_map:
+                sel.stage = auto_map[sel.line]
+                sel.stage = f"{sel.stage}~auto"  # marca como automático
+        print(
+            "  [AVISO] Mapeamento automático aplicado. Para maior precisão, "
+            "defina SELECTOR_STAGE_MAP em config.py após esta execução."
+        )
+
     return selectors
 
 
@@ -94,14 +124,32 @@ def _diagnose_stage(
     ts: str,
     metrics: RunMetrics,
     scraper_path: str,
+    include_unknown: bool = False,
 ) -> dict:
     """
     Executa diagnóstico para uma etapa específica.
     Compara apenas os seletores dessa etapa contra o HTML correspondente.
 
+    Args:
+        include_unknown: se True, inclui seletores sem stage mapeado.
+                         Usado na última etapa para não perder seletores órfãos.
+
     Retorna dict de substitutos encontrados.
     """
-    stage_selectors = [s for s in selectors if s.stage == stage_name]
+    if include_unknown:
+        stage_selectors = [
+            s for s in selectors
+            if s.stage == stage_name or s.stage == "unknown"
+            or s.stage == f"{stage_name}~auto"
+        ]
+        unknown = [s for s in selectors if s.stage == "unknown"]
+        if unknown:
+            print(f"  [+] {len(unknown)} seletor(es) sem stage mapeado incluídos nesta etapa")
+    else:
+        stage_selectors = [
+            s for s in selectors
+            if s.stage == stage_name or s.stage == f"{stage_name}~auto"
+        ]
 
     if not stage_selectors:
         return {}
@@ -289,6 +337,12 @@ def run(
             html_path_stage = crawl_result.pages[stage_name]
             metrics.stages_attempted += 1
 
+            # Na última etapa disponível, inclui seletores sem stage mapeado
+            is_last_stage = (stage_name == HTML_STAGE_ORDER[-1] or
+                stage_name not in HTML_STAGE_ORDER[HTML_STAGE_ORDER.index(stage_name)+1:])
+            available_stages = [s for s in HTML_STAGE_ORDER if s in crawl_result.pages]
+            is_last_available = (stage_name == available_stages[-1])
+
             replacements = _diagnose_stage(
                 stage_name=stage_name,
                 selectors=profile.selectors,
@@ -297,6 +351,7 @@ def run(
                 ts=ts,
                 metrics=metrics,
                 scraper_path=scraper_path,
+                include_unknown=is_last_available,
             )
 
             stages_analyzed.append(stage_name)
@@ -334,7 +389,7 @@ def run(
             metrics.llm_calls += 1
 
         po_report_path = REPORTS_DIR / f"po_report_{ts}.txt"
-        po_report_path.write_text(po_report, encoding="utf-8")
+        po_report_path.write_text(po_report, encoding="utf-8-sig")
         print(f"\n[PO] Relatório salvo em: {po_report_path.name}")
 
     else:

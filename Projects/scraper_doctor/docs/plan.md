@@ -4,7 +4,7 @@
 
 ### O que foi entregue
 - Extração de seletores via AST
-- Crawler autenticado no Five9 (Selenium)
+- Crawler autenticado no sistema alvo (Selenium)
 - Comparação estática por BeautifulSoup
 - Diagnóstico LLM com streaming (phi3)
 - Geração de scraper corrigido (qwen2.5-coder:7b)
@@ -14,7 +14,7 @@
 - Diagnóstico não é sequencial por etapa
 - Todos os seletores são comparados contra todos os HTMLs
 - KPIs limitados a tempo de execução
-- Login do Five9 falha (ID `input_username` mudou)
+- Login falha (ID `input_username` mudou — exemplo real de uso)
 
 ---
 
@@ -84,7 +84,7 @@ Fechar o ciclo completo: o agente executa o scraper real, captura o erro e itera
 ## v1.0.0 — Generalização
 
 ### Objetivo
-Remover dependência do Five9. A ferramenta deve funcionar para qualquer scraper Selenium.
+Remover dependência de qualquer sistema específico. A ferramenta deve funcionar para qualquer scraper Selenium.
 
 ### Entregas
 - Configuração de fluxo via YAML (etapas, seletores, URLs)

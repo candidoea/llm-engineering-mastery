@@ -1,5 +1,5 @@
 """
-crawler.py — Navegação autenticada no Five9 para captura de HTML por etapa.
+crawler.py — Navegação autenticada no sistema alvo para captura de HTML por etapa.
 
 Usa Selenium para replicar o fluxo do scraper original, capturando o HTML
 de cada página antes de interagir. Alimenta o comparator.py com HTMLs reais.
@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import os
 
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -28,6 +29,14 @@ TARGET_USERNAME = os.environ.get("TARGET_USERNAME", "")
 TARGET_PASSWORD = os.environ.get("TARGET_PASSWORD", "")
 
 # Caminhos Chrome — ajuste se necessário
+CHROME_DRIVER_PATH = os.environ.get(
+    "CHROME_DRIVER_PATH",
+    r"F:\chrome-test\chromedriver-win64\chromedriver.exe",
+)
+CHROME_BINARY_PATH = os.environ.get(
+    "CHROME_BINARY_PATH",
+    r"F:\chrome-test\chrome-win64\chrome.exe",
+)
 
 WAIT_TIMEOUT = 30  # segundos por elemento
 
@@ -59,19 +68,24 @@ def _save_html(driver, name: str) -> Path:
 
 
 def _build_driver(headless: bool = True) -> webdriver.Chrome:
-    """Inicializa o Chrome com gerenciamento automatico de driver (Selenium Manager)."""
+    """Inicializa o Chrome com as configurações do scraper original."""
+    service = Service(executable_path=CHROME_DRIVER_PATH)
     options = webdriver.ChromeOptions()
+    options.binary_location = CHROME_BINARY_PATH
+
     if headless:
         options.add_argument("--headless=new")
+
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    return webdriver.Chrome(options=options)
+
+    return webdriver.Chrome(service=service, options=options)
 
 
 def crawl(headless: bool = True) -> CrawlResult:
     """
-    Navega pelo Five9 replicando o fluxo do scraper original.
+    Navega pelo sistema alvo replicando o fluxo do scraper original.
     Captura o HTML em cada etapa antes de interagir.
 
     Args:
@@ -113,10 +127,10 @@ def crawl(headless: bool = True) -> CrawlResult:
 
         try:
             wait.until(
-                EC.presence_of_element_located((By.ID, "username"))
+                EC.presence_of_element_located((By.ID, "input_username"))
             ).send_keys(TARGET_USERNAME)
-            driver.find_element(By.ID, "password").send_keys(TARGET_PASSWORD)
-            driver.find_element(By.ID, "loginBtn").click()
+            driver.find_element(By.ID, "input_password").send_keys(TARGET_PASSWORD)
+            driver.find_element(By.ID, "input_login_submit").click()
             print("  Login submetido.")
         except Exception as e:
             result.errors.append(f"ETAPA 2 - Login falhou: {e}")
@@ -230,7 +244,7 @@ def crawl(headless: bool = True) -> CrawlResult:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Five9 HTML Crawler")
+    parser = argparse.ArgumentParser(description="Authenticated HTML Crawler")
     parser.add_argument(
         "--visible",
         action="store_true",
@@ -239,4 +253,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     crawl(headless=not args.visible)
-

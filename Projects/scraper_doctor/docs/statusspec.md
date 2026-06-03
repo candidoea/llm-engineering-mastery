@@ -10,13 +10,13 @@
 
 ### O que funciona
 - Extração de seletores via AST (12 seletores extraídos corretamente do `original_scraper.py`)
-- Navegação autenticada com Selenium (abre o Five9, captura HTML da tela de login)
+- Navegação autenticada com Selenium (abre o sistema alvo, captura HTML da tela de login)
 - Comparação estática via BeautifulSoup
 - Diagnóstico via LLM com streaming (phi3)
 - Geração de relatórios em `reports/`
 
 ### O que não funciona ainda
-- **Login falha:** `input_username` não encontrado — Five9 mudou o ID do campo
+- **Login falha:** `input_username` não encontrado — o site alterou o ID do campo
 - **Diagnóstico sequencial ausente:** todos os seletores são comparados contra todos os HTMLs, independente da etapa a que pertencem
 - **Sem parada e correção por etapa:** a ferramenta não para quando encontra um erro, não corrige, não testa e não avança
 - **KPIs incompletos:** apenas tempo de execução é registrado
@@ -86,8 +86,8 @@ O fluxo atual é: capturar todos os HTMLs → diagnosticar tudo → reportar. O 
 - Classes: `PascalCase` (ex: `ScraperProfile`, `ComparisonReport`)
 - Funções públicas: `snake_case` (ex: `extract_from_file`, `diagnose_with_llm`)
 - Funções privadas: prefixo `_` + `snake_case` (ex: `_build_driver`, `_save_html`)
-- Constantes: `UPPER_SNAKE_CASE` (ex: `FIVE9_URL`, `OLLAMA_TIMEOUT`)
-- Variáveis de ambiente: prefixo do serviço + `UPPER_SNAKE_CASE` (ex: `FIVE9_USERNAME`, `CHROME_DRIVER_PATH`)
+- Constantes: `UPPER_SNAKE_CASE` (ex: `TARGET_URL`, `OLLAMA_TIMEOUT`)
+- Variáveis de ambiente: prefixo do serviço + `UPPER_SNAKE_CASE` (ex: `TARGET_USERNAME`, `CHROME_DRIVER_PATH`)
 
 ### Estrutura de módulo
 Cada módulo segue a ordem:

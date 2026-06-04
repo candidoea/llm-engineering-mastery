@@ -268,7 +268,11 @@ def _score_candidate(target_id: str, candidate_id: str) -> int:
             score += 30
 
     if _semantic_overlap(target_id, candidate_id):
-        score += 10
+        # Semântica vale mais quando é o único sinal disponível
+        if score == 0:
+            score += 40  # único sinal — peso maior
+        else:
+            score += 10  # complemento de outro sinal
 
     return score
 
@@ -290,9 +294,11 @@ def _find_similar_classes(soup: BeautifulSoup, target_class: str) -> list[str]:
         elif isinstance(classes, str):
             all_classes.add(classes)
 
+    MIN_SCORE = 20
+
     for cls in all_classes:
         score = _score_candidate(target_class, cls)
-        if score > 0:
+        if score >= MIN_SCORE:
             scored.append((score, cls))
 
     scored.sort(key=lambda x: (-x[0], x[1]))
@@ -313,13 +319,15 @@ def _find_similar_ids(soup: BeautifulSoup, target_id: str) -> list[str]:
 
     scored = []
 
+    MIN_SCORE = 20  # score mínimo para ser candidato válido
+
     for tag in soup.find_all(id=True):
         existing_id = tag.get("id")
         if not existing_id:
             continue
 
         score = _score_candidate(target_id, existing_id)
-        if score == 0:
+        if score < MIN_SCORE:
             continue
 
         # Bônus: elemento do tipo correto para seletores de submit

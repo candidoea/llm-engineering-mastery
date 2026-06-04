@@ -244,6 +244,15 @@ def crawl(headless: bool = True, config_path: str | None = None) -> CrawlResult:
             return result
 
         time.sleep(6)
+        # Fecha aviso institucional se presente (ex: softphone update notice)
+        try:
+            ack_btn = driver.find_elements(By.XPATH, "//input[@value='Acknowledge']")
+            if ack_btn:
+                ack_btn[0].click()
+                print("  [OK] Aviso institucional fechado.")
+                time.sleep(3)
+        except Exception:
+            pass        
         result.pages["02_post_login"] = _save_html(driver, "02_post_login")
 
         # ETAPA 3: Dashboard & Reports

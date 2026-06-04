@@ -123,6 +123,49 @@ def _check_xpath(
         return None
 
 
+def _find_xpath_candidates(soup: BeautifulSoup, xpath: str) -> list[str]:
+    """
+    Quando um XPATH falha, tenta encontrar candidatos alternativos.
+
+    Extrai o texto buscado do XPATH (padrão contains(text(), 'X'))
+    e procura elementos com texto similar ou ID relacionado.
+
+    Retorna lista de XPATHs alternativos ou IDs encontrados.
+    """
+    import re
+
+    candidates = []
+
+    # Extrai texto do padrão contains(text(), '...')
+    text_match = re.search(r"contains\(text\(\),\s*['\"]([^'\"]+)['\"]", xpath)
+    if not text_match:
+        return candidates
+
+    search_text = text_match.group(1)
+    # Remove entidades HTML e normaliza
+    search_text_clean = search_text.replace("&amp;", "&").replace("&", "").strip()
+    search_words = [w for w in search_text_clean.lower().split() if len(w) > 2]
+
+    # Busca elementos com texto similar
+    for tag in soup.find_all(True):
+        tag_text = tag.get_text(strip=True)
+        if not tag_text:
+            continue
+
+        tag_lower = tag_text.lower()
+        # Verifica se pelo menos metade das palavras estão presentes
+        matches = sum(1 for w in search_words if w in tag_lower)
+        if matches >= max(1, len(search_words) // 2):
+            tag_id = tag.get("id")
+            if tag_id:
+                candidates.append(f"By.ID '{tag_id}'")
+            elif tag.get("class"):
+                cls = tag["class"][0] if isinstance(tag["class"], list) else tag["class"]
+                candidates.append(f"By.CLASS_NAME '{cls}'")
+
+    return candidates[:3]
+
+
 def _check_selector(sel: Selector, soup: BeautifulSoup) -> SelectorResult:
     """Verifica um seletor individual no soup."""
 
@@ -189,8 +232,11 @@ def _check_selector(sel: Selector, soup: BeautifulSoup) -> SelectorResult:
         # Tenta verificação real com lxml
         result = _check_xpath(value, soup)
         if result is not None:
-            # Substitui o dummy selector pelo real
             result.selector = sel
+            if not result.found:
+                # XPATH quebrado — tenta encontrar candidatos por texto
+                candidates = _find_xpath_candidates(soup, value)
+                result.candidates = candidates
             return result
         return SelectorResult(
             selector=sel,

@@ -360,9 +360,7 @@ def run(
                 all_replacements.update(replacements)
                 metrics.stages_failed += 1
                 found_broken = True
-                print(f"\n[STOP] Etapa '{stage_name}' tem seletores quebrados.")
-                print("[STOP] Corrija e execute novamente para avançar.")
-                break
+                print(f"\n[!] Etapa '{stage_name}': {len(replacements)} correção(ões) aplicada(s). Continuando...")
             else:
                 metrics.stages_completed += 1
                 print(f"  ✓ Etapa '{stage_name}' — todos os seletores OK")

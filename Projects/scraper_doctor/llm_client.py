@@ -214,11 +214,38 @@ def fix_with_llm(
     applied = []
     skipped = []
 
+    import re as _re
+
     for original, info in replacements.items():
         substituto = info.get("substituto")
         if not substituto or substituto == "null":
             continue
 
+        # Detecta se o substituto sugere mudança de estratégia
+        # Formato: "By.ID 'valor'" ou "By.CLASS_NAME 'valor'"
+        strategy_change = _re.match(
+            r"By\.(\w+)\s+['\"]([^'\"]+)['\"]", str(substituto)
+        )
+
+        if strategy_change:
+            new_strategy = strategy_change.group(1)
+            new_value = strategy_change.group(2)
+
+            # Substitui a tupla inteira (By.QUALQUER, "original") → (By.NEW, "valor")
+            pattern = _re.compile(
+                r'By\.\w+,\s*["\']'+ _re.escape(original) + r'["\']'
+            )
+            if pattern.search(fixed_code):
+                fixed_code = pattern.sub(
+                    f'By.{new_strategy}, "{new_value}"', fixed_code
+                )
+                applied.append(f"  (By.?, '{original}') → (By.{new_strategy}, '{new_value}')")
+                continue
+            else:
+                skipped.append(f"  '{original}' → IGNORADO (tupla não encontrada no código)")
+                continue
+
+        # Substituição simples: só o valor, mesma estratégia
         exists_in_code = (
             f'"{original}"' in fixed_code
             or f"'{original}'" in fixed_code

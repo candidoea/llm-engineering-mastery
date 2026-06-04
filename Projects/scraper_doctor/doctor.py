@@ -1,11 +1,15 @@
 """
 doctor.py — Orquestrador do Scraper Doctor.
 
-v0.3.0 — Diagnóstico por etapa (TASK-04):
-- Cada seletor é comparado apenas contra o HTML da sua etapa
-- Elimina falsos positivos (seletores de páginas internas marcados como
-  quebrados no HTML de login)
-- Para na primeira etapa com quebra real
+Modos de crawl:
+  --crawl   : crawler hardcoded (Five9-específico, estável)
+  --generic : crawler genérico (reproduz fluxo do script original, qualquer site)
+
+Fluxo comum após crawl:
+  FASE 3: Diagnóstico por etapa (comparator.py)
+  FASE 4: LLM apenas para seletores sem substituto estático
+  FASE 5: Gera scraper_fixed.py com correções mínimas
+  FASE 6: Relatório PO + KPIs
 """
 
 import sys
@@ -24,6 +28,7 @@ from config import (
     build_stage_map,
 )
 from comparator import compare
+from context_agent import extract_context, summarize_context
 from extractor import Selector, extract_from_file, summarize
 from llm_client import diagnose_with_llm, fix_with_llm, generate_po_report
 from metrics import RunMetrics
@@ -53,7 +58,7 @@ def _load_html(html_path: str | None, url: str | None) -> Path:
             print(f"[HTML] Falha: {e}")
             sys.exit(1)
 
-    print("[ERRO] Forneça --html, --url ou --crawl.")
+    print("[ERRO] Forneça --html, --url, --crawl ou --generic.")
     sys.exit(1)
 
 
@@ -82,12 +87,9 @@ def _apply_stage_map(selectors: list[Selector]) -> list[Selector]:
     Anota cada seletor com sua etapa.
 
     Prioridade:
-    1. SELECTOR_STAGE_MAP manual (config.py) — mais preciso
-    2. build_stage_map automático — para seletores não mapeados
-    3. 'unknown' — se nenhum mapa cobrir
-
-    Quando mais de 30% dos seletores ficam como 'unknown',
-    gera o mapa automático e avisa o usuário.
+    1. SELECTOR_STAGE_MAP manual (config.py)
+    2. build_stage_map automático quando >30% unknown
+    3. 'unknown'
     """
     for sel in selectors:
         sel.stage = SELECTOR_STAGE_MAP.get(sel.line, "unknown")
@@ -106,11 +108,10 @@ def _apply_stage_map(selectors: list[Selector]) -> list[Selector]:
         )
         for sel in selectors:
             if sel.stage == "unknown" and sel.line in auto_map:
-                sel.stage = auto_map[sel.line]
-                sel.stage = f"{sel.stage}~auto"  # marca como automático
+                sel.stage = f"{auto_map[sel.line]}~auto"
         print(
             "  [AVISO] Mapeamento automático aplicado. Para maior precisão, "
-            "defina SELECTOR_STAGE_MAP em config.py após esta execução."
+            "defina SELECTOR_STAGE_MAP em config.py."
         )
 
     return selectors
@@ -125,21 +126,19 @@ def _diagnose_stage(
     metrics: RunMetrics,
     scraper_path: str,
     include_unknown: bool = False,
+    script_context=None,
 ) -> dict:
     """
     Executa diagnóstico para uma etapa específica.
     Compara apenas os seletores dessa etapa contra o HTML correspondente.
-
-    Args:
-        include_unknown: se True, inclui seletores sem stage mapeado.
-                         Usado na última etapa para não perder seletores órfãos.
-
+    O script_context enriquece o prompt do LLM com a intenção da etapa.
     Retorna dict de substitutos encontrados.
     """
     if include_unknown:
         stage_selectors = [
             s for s in selectors
-            if s.stage == stage_name or s.stage == "unknown"
+            if s.stage == stage_name
+            or s.stage == "unknown"
             or s.stage == f"{stage_name}~auto"
         ]
         unknown = [s for s in selectors if s.stage == "unknown"]
@@ -157,7 +156,6 @@ def _diagnose_stage(
     print(f"\n[FASE 3] Etapa '{stage_name}' — {len(stage_selectors)} seletor(es)")
 
     report = compare(stage_selectors, html_path)
-
     metrics.selectors_ok += len(report.ok)
     metrics.selectors_broken += len(report.broken)
 
@@ -172,11 +170,9 @@ def _diagnose_stage(
         subst = f" → substitutos: {', '.join(r.candidates)}" if r.candidates else ""
         print(f"    linha {r.selector.line}: '{r.selector.value}'{subst}")
 
-    # Salva relatório da etapa
     report_path = REPORTS_DIR / f"static_report_{ts}_{stage_name}.txt"
     report_path.write_text(report.summary(), encoding="utf-8")
 
-    # Separa: com substituto automático vs. sem
     with_candidates = [r for r in report.broken if r.candidates]
     without_candidates = [r for r in report.broken if not r.candidates]
 
@@ -188,11 +184,14 @@ def _diagnose_stage(
         all_replacements[r.selector.value] = {
             "substituto": best,
             "estrategia": r.selector.strategy,
-            "motivo": f"Substituto encontrado por similaridade",
+            "motivo": "Substituto encontrado por similaridade",
             "linha": r.selector.line,
             "origem": "estatico",
         }
         print(f"  AUTO: '{r.selector.value}' → '{best}'")
+
+    if not without_candidates:
+        print("  Todos os substitutos encontrados estaticamente — LLM não necessário.")
 
     # LLM apenas para seletores sem substituto
     if without_candidates:
@@ -202,13 +201,22 @@ def _diagnose_stage(
             {"line": r.selector.line, "strategy": r.selector.strategy, "value": r.selector.value}
             for r in without_candidates
         ]
-
         html_snippet = _extract_relevant_html(html_path)
+
+        # Enriquece o contexto com a intenção da etapa (se disponível)
+        stage_intent = None
+        if script_context:
+            for intent in script_context.stages:
+                if (intent.name in stage_name or stage_name in intent.name
+                        or intent.stage_type in stage_name):
+                    stage_intent = intent
+                    break
 
         t4 = time.perf_counter()
         llm_results = diagnose_with_llm(
             broken_without_candidates=broken_for_llm,
             html_snippet=html_snippet,
+            stage_intent=stage_intent,
         )
         metrics.llm_time_s += time.perf_counter() - t4
         metrics.llm_calls += 1
@@ -228,31 +236,114 @@ def _diagnose_stage(
             encoding="utf-8",
         )
         print(f"[FASE 4] Diagnóstico salvo: diagnosis_{ts}_{stage_name}.txt")
-    else:
-        print(f"  Todos os substitutos encontrados estaticamente — LLM não necessário.")
 
-    # Fase 5: gera scraper corrigido se solicitado
+    # Fase 5: gera scraper corrigido acumulando todas as correções
     if all_replacements and fix:
         print(f"\n[FASE 5] Aplicando correções da etapa '{stage_name}'...")
-        original_code = Path(scraper_path).read_text(encoding="utf-8")
+
+        # Lê sempre o estado mais recente do fixed (acumula correções entre etapas)
+        fixed_path = OUTPUT_DIR / f"scraper_fixed_{ts}.py"
+        if fixed_path.exists():
+            source_to_fix = fixed_path.read_text(encoding="utf-8")
+        else:
+            source_to_fix = Path(scraper_path).read_text(encoding="utf-8")
 
         t5 = time.perf_counter()
         fixed_code = fix_with_llm(
-            original_code=original_code,
+            original_code=source_to_fix,
             replacements=all_replacements,
         )
         metrics.llm_time_s += time.perf_counter() - t5
-
         metrics.selectors_fixed += len([
             v for v in all_replacements.values()
             if v.get("substituto") and v.get("substituto") != "null"
         ])
 
-        fixed_path = OUTPUT_DIR / f"scraper_fixed_{ts}.py"
         fixed_path.write_text(fixed_code, encoding="utf-8")
         print(f"[FASE 5] Scraper corrigido salvo: {fixed_path.name}")
 
     return all_replacements
+
+
+def _run_crawl_and_diagnose(
+    scraper_path: str,
+    crawl_result,
+    profile,
+    fix: bool,
+    ts: str,
+    metrics: RunMetrics,
+    stage_order: list[str] | None = None,
+    script_context=None,
+) -> tuple[dict, list[str]]:
+    """
+    Executa o diagnóstico por etapa sobre o resultado de qualquer crawler.
+    O script_context enriquece o diagnóstico com intenções semânticas.
+    Retorna (all_replacements, stages_analyzed).
+    """
+    if not crawl_result.pages:
+        print("[ERRO] Nenhuma página capturada.")
+        return {}, []
+
+    if crawl_result.errors:
+        print(f"\n[AVISO] {len(crawl_result.errors)} erro(s) durante o crawl:")
+        for err in crawl_result.errors:
+            print(f"  {err.splitlines()[0]}")
+
+    print(f"\n[FASE 2] {len(crawl_result.pages)} página(s) capturada(s).\n")
+
+    print("=" * 60)
+    print("FASE 3 — Diagnóstico por etapa")
+    print("=" * 60)
+
+    # Determina ordem das etapas
+    if stage_order:
+        ordered = [s for s in stage_order if s in crawl_result.pages]
+        # Etapas capturadas mas não na ordem conhecida (modo genérico)
+        extra = [s for s in crawl_result.pages if s not in stage_order]
+        ordered += extra
+    else:
+        ordered = list(crawl_result.pages.keys())
+
+    found_broken = False
+    all_replacements: dict = {}
+    stages_analyzed: list[str] = []
+    available = list(ordered)
+
+    for stage_name in ordered:
+        if stage_name not in crawl_result.pages:
+            continue
+
+        html_path_stage = crawl_result.pages[stage_name]
+        metrics.stages_attempted += 1
+        is_last = (stage_name == available[-1])
+
+        replacements = _diagnose_stage(
+            stage_name=stage_name,
+            selectors=profile.selectors,
+            html_path=html_path_stage,
+            fix=fix,
+            ts=ts,
+            metrics=metrics,
+            scraper_path=scraper_path,
+            include_unknown=is_last,
+            script_context=script_context,
+        )
+
+        stages_analyzed.append(stage_name)
+
+        if replacements:
+            all_replacements.update(replacements)
+            metrics.stages_failed += 1
+            found_broken = True
+            print(f"\n[!] Etapa '{stage_name}': {len(replacements)} correção(ões). Continuando...")
+        else:
+            metrics.stages_completed += 1
+            print(f"  ✓ Etapa '{stage_name}' — todos os seletores OK")
+
+    if not found_broken:
+        print("\n[OK] Todos os seletores estão corretos em todas as etapas.")
+
+    return all_replacements, stages_analyzed
 
 
 def run(
@@ -260,6 +351,7 @@ def run(
     html_path: str | None = None,
     url: str | None = None,
     crawl: bool = False,
+    generic: bool = False,
     visible: bool = False,
     fix: bool = False,
 ) -> None:
@@ -281,7 +373,6 @@ def run(
     _apply_stage_map(profile.selectors)
 
     metrics.selectors_total = len(profile.selectors)
-
     print(f"  Seletores: {len(profile.selectors)}")
     print(f"  URLs:      {len(profile.urls)}")
     print(f"  Ações:     {len(profile.actions)}")
@@ -294,106 +385,55 @@ def run(
         print("\n[AVISO] Nenhum seletor encontrado.")
         return
 
+    # Contexto semântico — LLM lê o script e entende as intenções
+    # Usado para enriquecer o diagnóstico nas etapas seguintes
+    print("\n[FASE 1b] Extraindo contexto semântico do script...")
+    script_context = extract_context(scraper_path)
+    print(summarize_context(script_context))
+
     # ------------------------------------------------------------------
     # FASE 2: Captura do HTML
     # ------------------------------------------------------------------
     print("\n[FASE 2] Carregando HTML atual...")
 
-    if crawl:
-        from crawler import crawl as do_crawl
+    all_replacements: dict = {}
+    stages_analyzed: list[str] = []
 
-        print("[FASE 2] Modo crawl: navegando no site com Selenium...")
+    if crawl or generic:
         t_crawl = time.perf_counter()
-        crawl_result = do_crawl(headless=not visible)
+
+        if generic:
+            from generic_crawler import crawl_from_script
+            print("[FASE 2] Modo genérico: reproduzindo fluxo do script original...")
+            crawl_result = crawl_from_script(
+                scraper_path=scraper_path,
+                headless=not visible,
+            )
+            # Modo genérico não usa HTML_STAGE_ORDER — etapas derivadas do script
+            stage_order = None
+        else:
+            from crawler import crawl as do_crawl
+            print("[FASE 2] Modo crawl: navegando no site com Selenium...")
+            crawl_result = do_crawl(headless=not visible)
+            stage_order = HTML_STAGE_ORDER
+
         metrics.crawl_time_s = time.perf_counter() - t_crawl
 
-        if not crawl_result.pages:
-            print("[ERRO] Nenhuma página capturada.")
-            return
-
-        if crawl_result.errors:
-            print(f"\n[AVISO] {len(crawl_result.errors)} erro(s) durante o crawl:")
-            for err in crawl_result.errors:
-                # Mostra apenas primeira linha do erro (stacktrace é muito longo)
-                print(f"  {err.splitlines()[0]}")
-
-        print(f"\n[FASE 2] {len(crawl_result.pages)} página(s) capturada(s).\n")
-
-        # ------------------------------------------------------------------
-        # FASE 3: Diagnóstico por etapa na ordem correta
-        # ------------------------------------------------------------------
-        print("=" * 60)
-        print("FASE 3 — Diagnóstico por etapa")
-        print("=" * 60)
-
-        found_broken = False
-        all_replacements: dict = {}
-        stages_analyzed: list[str] = []
-
-        for stage_name in HTML_STAGE_ORDER:
-            if stage_name not in crawl_result.pages:
-                continue
-
-            html_path_stage = crawl_result.pages[stage_name]
-            metrics.stages_attempted += 1
-
-            # Na última etapa disponível, inclui seletores sem stage mapeado
-            is_last_stage = (stage_name == HTML_STAGE_ORDER[-1] or
-                stage_name not in HTML_STAGE_ORDER[HTML_STAGE_ORDER.index(stage_name)+1:])
-            available_stages = [s for s in HTML_STAGE_ORDER if s in crawl_result.pages]
-            is_last_available = (stage_name == available_stages[-1])
-
-            replacements = _diagnose_stage(
-                stage_name=stage_name,
-                selectors=profile.selectors,
-                html_path=html_path_stage,
-                fix=fix,
-                ts=ts,
-                metrics=metrics,
-                scraper_path=scraper_path,
-                include_unknown=is_last_available,
-            )
-
-            stages_analyzed.append(stage_name)
-
-            if replacements:
-                all_replacements.update(replacements)
-                metrics.stages_failed += 1
-                found_broken = True
-                print(f"\n[!] Etapa '{stage_name}': {len(replacements)} correção(ões) aplicada(s). Continuando...")
-            else:
-                metrics.stages_completed += 1
-                print(f"  ✓ Etapa '{stage_name}' — todos os seletores OK")
-
-        if not found_broken:
-            print("\n[OK] Todos os seletores estão corretos em todas as etapas.")
-
-        # ------------------------------------------------------------------
-        # RELATÓRIO DE CONTEXTO PARA O PO
-        # Gerado sempre ao final — independente de ter encontrado quebras
-        # ------------------------------------------------------------------
-        print("\n" + "=" * 60)
-        print("RELATÓRIO DE CONTEXTO — Product Owner")
-        print("=" * 60)
-
-        t_po = time.perf_counter()
-        po_report = generate_po_report(
-            replacements=all_replacements,
-            stages_analyzed=stages_analyzed,
-            infra_issues=profile.infra_issues,
+        all_replacements, stages_analyzed = _run_crawl_and_diagnose(
+            scraper_path=scraper_path,
+            crawl_result=crawl_result,
+            profile=profile,
+            fix=fix,
+            ts=ts,
+            metrics=metrics,
+            stage_order=stage_order,
+            script_context=script_context,
         )
-        metrics.llm_time_s += time.perf_counter() - t_po
-        if all_replacements:
-            metrics.llm_calls += 1
-
-        po_report_path = REPORTS_DIR / f"po_report_{ts}.txt"
-        po_report_path.write_text(po_report, encoding="utf-8")
-        print(f"\n[PO] Relatório salvo em: {po_report_path.name}")
 
     else:
-        # Modo sem crawl: usa HTML único fornecido
+        # Modo HTML local ou URL
         resolved_html = _load_html(html_path, url)
-        _diagnose_stage(
+        replacements = _diagnose_stage(
             stage_name="manual",
             selectors=profile.selectors,
             html_path=resolved_html,
@@ -402,6 +442,29 @@ def run(
             metrics=metrics,
             scraper_path=scraper_path,
         )
+        all_replacements.update(replacements)
+        stages_analyzed.append("manual")
+
+    # ------------------------------------------------------------------
+    # RELATÓRIO DE CONTEXTO PARA O PO
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("RELATÓRIO DE CONTEXTO — Product Owner")
+    print("=" * 60)
+
+    t_po = time.perf_counter()
+    po_report = generate_po_report(
+        replacements=all_replacements,
+        stages_analyzed=stages_analyzed,
+        infra_issues=profile.infra_issues,
+    )
+    metrics.llm_time_s += time.perf_counter() - t_po
+    if all_replacements:
+        metrics.llm_calls += 1
+
+    po_report_path = REPORTS_DIR / f"po_report_{ts}.txt"
+    po_report_path.write_text(po_report, encoding="utf-8-sig")
+    print(f"\n[PO] Relatório salvo em: {po_report_path.name}")
 
     metrics.total_time_s = time.perf_counter() - start
     print(metrics.report())
@@ -418,12 +481,19 @@ if __name__ == "__main__":
     parser.add_argument("scraper", help="Caminho para o scraper .py")
     parser.add_argument("--html", default=None, help="HTML local")
     parser.add_argument("--url", default=None, help="URL para captura via requests")
-    parser.add_argument("--crawl", action="store_true", help="Navega com Selenium")
+    parser.add_argument(
+        "--crawl", action="store_true",
+        help="Crawler hardcoded (estável, site-específico)"
+    )
+    parser.add_argument(
+        "--generic", action="store_true",
+        help="Crawler genérico — reproduz fluxo do script original (qualquer site)"
+    )
     parser.add_argument("--visible", action="store_true", help="Chrome visível")
-    parser.add_argument("--fix", action="store_true", help="Gera scraper corrigido")
+    parser.add_argument("--fix", action="store_true", help="Gera scraper_fixed.py")
     parser.add_argument(
         "--agent", action="store_true",
-        help="Agent mode: valida o scraper_fixed.py e itera automaticamente"
+        help="Agent mode: valida scraper_fixed.py e itera automaticamente"
     )
     parser.add_argument(
         "--iterations", type=int, default=3,
@@ -432,7 +502,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Se --agent, executa o ciclo autônomo no scraper_fixed mais recente
+    if args.crawl and args.generic:
+        print("[ERRO] Use --crawl ou --generic, não ambos.")
+        sys.exit(1)
+
     if args.agent:
         from agent import run_agent
         import glob
@@ -445,16 +518,12 @@ if __name__ == "__main__":
 
         if not fixed_files:
             print("[AGENT] Nenhum scraper_fixed_*.py encontrado em output/")
-            print("[AGENT] Execute primeiro: python doctor.py <scraper> --crawl --fix")
+            print("[AGENT] Execute primeiro com --crawl --fix ou --generic --fix")
             sys.exit(1)
 
         latest_fixed = fixed_files[0]
         print(f"[AGENT] Usando scraper mais recente: {Path(latest_fixed).name}")
-
-        run_agent(
-            scraper_fixed_path=latest_fixed,
-            max_iterations=args.iterations,
-        )
+        run_agent(scraper_fixed_path=latest_fixed, max_iterations=args.iterations)
         sys.exit(0)
 
     run(
@@ -462,6 +531,7 @@ if __name__ == "__main__":
         html_path=args.html,
         url=args.url,
         crawl=args.crawl,
+        generic=args.generic,
         visible=args.visible,
         fix=args.fix,
     )

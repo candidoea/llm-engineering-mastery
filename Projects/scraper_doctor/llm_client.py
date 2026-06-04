@@ -107,6 +107,7 @@ def diagnose_with_llm(
     broken_without_candidates: list[dict],
     html_snippet: str,
     model: str | None = None,
+    stage_intent=None,
 ) -> dict:
     """
     Chama o LLM APENAS para seletores sem substituto automático.
@@ -114,13 +115,14 @@ def diagnose_with_llm(
 
     Args:
         broken_without_candidates: lista de seletores sem substituto encontrado
-            ex: [{"line": 81, "strategy": "CLASS_NAME", "value": "yui-navset-top"}]
         html_snippet: trecho do HTML com elementos interativos
         model: modelo a usar
+        stage_intent: StageIntent opcional — contexto semântico da etapa
+            Enriquece o prompt com o OBJETIVO da etapa (ex: "fazer login")
+            para que o LLM saiba o que procurar, não apenas o que estava lá.
 
     Returns:
         dict mapeando valor do seletor para substituto sugerido
-        ex: {"yui-navset-top": "nav-container"}
     """
     if not broken_without_candidates:
         return {}
@@ -130,6 +132,21 @@ def diagnose_with_llm(
         for s in broken_without_candidates
     ])
 
+    # Bloco de contexto semântico — o diferencial do chain-of-thought
+    if stage_intent:
+        context_block = f"""
+CONTEXTO DA ETAPA:
+  Objetivo: {stage_intent.objective}
+  Tipo: {stage_intent.stage_type}
+  Campos esperados: {", ".join(stage_intent.fields_needed) if stage_intent.fields_needed else "não especificado"}
+  Indicador de sucesso: {stage_intent.success_indicator}
+
+Use este contexto para encontrar elementos que CUMPRAM O MESMO OBJETIVO,
+mesmo que tenham IDs ou classes diferentes dos seletores originais.
+"""
+    else:
+        context_block = ""
+
     system = (
         "Você é um especialista em Selenium. "
         "Responda SOMENTE em português do Brasil. "
@@ -138,7 +155,7 @@ def diagnose_with_llm(
 
     prompt = f"""Analise os seletores Selenium quebrados e o HTML atual.
 Retorne um JSON com o substituto mais provável para cada seletor.
-
+{context_block}
 SELETORES QUEBRADOS (sem substituto automático encontrado):
 {selectors_text}
 
